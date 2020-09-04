@@ -45,29 +45,43 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // compression 미들웨어 사용
 app.use(compression());
 
-app.get('/', (req, res) => {
-  db.query('SELECT * FROM topic', function (error, topics) {
-      var title = 'Welcome';
-      var description = 'Hello, Node.js';
-      var list = template.list(topics);
-      var html = template.HTML(title, list,
-        `<h2>${title}</h2>${description}`,
-        `<a href="/create">create</a>`
-      );
-      res.send(html);
-  });
+/* 직접 미들웨어를 만드는 방법
+미들웨어 함수에 세 파리미터가 필수적으로 들어간다
+현재는 app.use의 방식을 이전과 같이 동일하게 사용했지만,
+예를들어 get 방식으로 라우팅하는 모든 접속에 미들웨어를 한정적으로 이용하고 싶다면
+app.get('*',(req, res, next) =>{}... 와 같은 방식으로 사용할 수 있다.
+
+이 외에도, app.use('page/:id', ...) 같이 라우터 경로만으로 한정적으로 이용할 수 있다.
+미들웨어의 여러 사용 방식은 http://expressjs.com/en/guide/using-middleware.html
+*/
+app.use((req, res, next)=>{
+  // topic 테이블 전체를 부르는 쿼리문을 req 하위의 topics으로 생성하는 미들웨어이다.
+   db.query('SELECT * FROM topic', function (error, topics) {
+       req.topics = topics;
+       // next()는 다음 미들웨어 함수를 호출하는 역할을 한다.
+       next();
+   });
 });
 
+ app.get('/', (req, res) => {
+       var title = 'Welcome';
+       var description = 'Hello, Node.js';
+       var list = template.list(req.topics);
+       var html = template.HTML(title, list,
+         `<h2>${title}</h2>${description}`,
+         `<a href="/create">create</a>`
+       );
+       res.send(html);
+ });
+
 app.get('/page/:id',(req,res)=> {
-  db.query('SELECT * FROM topic', function(error, topics){
-    if(error) throw error
     db.query(`SELECT * FROM topic, author WHERE topic.author_id = author.id AND topic.id=?`
     , [req.params.id], function(error2, topic){
       if(error2) throw error
         var title = topic[0].title;
         var description = topic[0].description;
         var author = topic[0].name;
-        var list = template.list(topics);
+        var list = template.list(req.topics);
         var html = template.HTML(title, list,
         `<h2>${title}</h2>${description}<br>by ${author}`,
         ` <a href="/create">create</a>
@@ -79,16 +93,13 @@ app.get('/page/:id',(req,res)=> {
       );
         res.send(html);
     });
-  });
 });
 
 app.get('/create',(req,res) => {
-  db.query('SELECT * FROM topic', function (error, topics) {
-    if(error) throw error
       db.query('SELECT * FROM author', function (error2, author) {
         if(error2) throw error2
       var title = 'WEB - create';
-      var list = template.list(topics);
+      var list = template.list(req.topics);
       var html = template.HTML(title, list, `
         <form action="/create_process" method="post">
           <p><input type="text" name="title" placeholder="title"></p>
@@ -105,12 +116,11 @@ app.get('/create',(req,res) => {
       `, '');
       res.send(html);
     });
-  });
 });
 
 app.post('/create_process',(req,res) => {
     /* 기존의 qs.parse(body);를 사용해 req.on()을 통해 body 변수에
-       데이터를 하나씩 받아 왔으나, 미들웨어함수인 .body()를 이용하면
+       데이터를 하나씩 받아 왔으나, 미들웨어함수인 .body를 이용하면
        아래와 같은 이전의 과정이 필요하지 않게 된다.
        var body = '';
        req.on('data', (data) => {
@@ -119,7 +129,7 @@ app.post('/create_process',(req,res) => {
        req.on('end', () => {
          var post = qs.parse(body); ...
     */
-    var post = req.body();
+    var post = req.body;
     db.query('INSERT INTO topic (title,description,created,author_id) VALUES (?,?,NOW(),?)'
     ,[post.title,post.description,post.author], function(error,topics) {
       if(error) throw error;
@@ -128,13 +138,11 @@ app.post('/create_process',(req,res) => {
 });
 
 app.get('/update/:id',(req,res) => {
-  db.query('SELECT * FROM topic',function(error,topics){
-    if(error) throw error
     db.query(`SELECT * FROM topic WHERE id=?`
       ,[req.params.id],function(error2,topic){
       if(error2) throw error2
        var title = 'Web - update';
-       var list = template.list(topics);
+       var list = template.list(req.topics);
        var html = template.HTML(title, list,
         `<form action="/update_process" method="post">
           <input type="hidden" name="id" value="${topic[0].id}">
@@ -145,11 +153,10 @@ app.get('/update/:id',(req,res) => {
            );
            res.send(html);
     });
-  });
 });
 
 app.post('/update_process',(req,res) => {
-      var post = req.body();
+      var post = req.body;
       db.query("UPDATE topic SET title=?, description=? WHERE id = ? "
       , [post.title,post.description,post.id,],function(error,topic){
         if(error) throw error;
@@ -158,7 +165,7 @@ app.post('/update_process',(req,res) => {
 });
 
 app.post('/page/delete_process',(req,res) => {
-    var post = req.body();
+    var post = req.body;
     db.query('DELETE FROM topic WHERE id = ? ',[post.id], (error,topics) => {
       if(error) throw error;
       res.redirect(302, `/`);
